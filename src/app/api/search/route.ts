@@ -179,17 +179,26 @@ export async function GET(request: NextRequest) {
     : Promise.resolve([]);
 
   // 添加超时控制和错误处理，避免慢接口拖累整体响应
-  const searchPromises = apiSites.map((site) =>
-    Promise.race([
-      searchFromApi(site, query),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`${site.name} timeout`)), 20000)
-      ),
-    ]).catch((err) => {
-      console.warn(`搜索失败 ${site.name}:`, err.message);
-      return []; // 返回空数组而不是抛出错误
-    })
-  );
+  // Cloudflare Workers 免费版限制每请求 50 subrequest，分批执行避免超限
+  const MAX_CONCURRENT_API_SOURCES = 30;
+  const apiResults: any[][] = [];
+  for (let i = 0; i < apiSites.length; i += MAX_CONCURRENT_API_SOURCES) {
+    const batchSites = apiSites.slice(i, i + MAX_CONCURRENT_API_SOURCES);
+    const batchResults = await Promise.all(
+      batchSites.map((site) =>
+        Promise.race([
+          searchFromApi(site, query),
+          new Promise<any[]>((_, reject) =>
+            setTimeout(() => reject(new Error(`${site.name} timeout`)), 20000)
+          ),
+        ]).catch((err) => {
+          console.warn(`搜索失败 ${site.name}:`, err.message);
+          return [];
+        })
+      )
+    );
+    apiResults.push(...batchResults);
+  }
 
   const scriptSummaries = await listEnabledSourceScripts();
   const scriptPromises = scriptSummaries.map((script) =>
@@ -241,19 +250,16 @@ export async function GET(request: NextRequest) {
   );
 
   try {
-    const allResults = await Promise.all([
+    const [openlistResultsRaw, ...embyAndScriptResults] = await Promise.all([
       openlistPromise,
       ...embyPromises,
-      ...searchPromises,
       ...scriptPromises,
     ]);
 
-    // 分离结果：第一个是 openlist，接下来是 emby 结果，最后是 api 结果
-    // 添加安全检查，确保即使某个结果处理出错也不影响其他结果
-    const openlistResults = Array.isArray(allResults[0]) ? allResults[0] : [];
-    const embyResultsArray = allResults.slice(1, 1 + embyPromises.length);
-    const apiResults = allResults.slice(1 + embyPromises.length, 1 + embyPromises.length + searchPromises.length);
-    const scriptResults = allResults.slice(1 + embyPromises.length + searchPromises.length);
+    // 分离结果：第一个是 openlist，接下来是 emby 结果，最后是 script 结果
+    const openlistResults = Array.isArray(openlistResultsRaw) ? openlistResultsRaw : [];
+    const embyResultsArray = embyAndScriptResults.slice(0, embyPromises.length);
+    const scriptResults = embyAndScriptResults.slice(embyPromises.length);
 
     // 合并所有 Emby 结果，添加安全检查
     const embyResults = embyResultsArray.filter(Array.isArray).flat();

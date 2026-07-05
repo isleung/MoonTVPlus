@@ -328,101 +328,109 @@ export async function GET(request: NextRequest) {
       }
 
       // 为每个源创建搜索 Promise
-      const searchPromises = sortedApiSites.map(async (site) => {
-        try {
-          // 添加超时控制
-          const searchPromise = Promise.race([
-            searchFromApi(site, query),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error(`${site.name} timeout`)), 20000)
-            ),
-          ]);
+      // Cloudflare Workers 免费版限制每请求 50 subrequest，分批执行
+      const MAX_CONCURRENT_API_SOURCES_WS = 30;
+      const processApiSites = async () => {
+        for (let i = 0; i < sortedApiSites.length; i += MAX_CONCURRENT_API_SOURCES_WS) {
+          const batchSites = sortedApiSites.slice(i, i + MAX_CONCURRENT_API_SOURCES_WS);
+          await Promise.all(batchSites.map(async (site) => {
+      try {
+        // 添加超时控制
+        const searchPromise = Promise.race([
+          searchFromApi(site, query),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`${site.name} timeout`)), 20000)
+          ),
+        ]);
 
-          const results = await searchPromise as any[];
+        const results = await searchPromise as any[];
 
-          // 添加安全检查，确保结果是数组
-          const safeResults = Array.isArray(results) ? results : [];
+        // 添加安全检查，确保结果是数组
+        const safeResults = Array.isArray(results) ? results : [];
 
-          // 过滤黄色内容
-          let filteredResults = safeResults;
-          if (!config.SiteConfig.DisableYellowFilter) {
-            filteredResults = safeResults.filter((result) => {
-              const typeName = result.type_name || '';
-              return !yellowWords.some((word: string) => typeName.includes(word));
-            });
+        // 过滤黄色内容
+        let filteredResults = safeResults;
+        if (!config.SiteConfig.DisableYellowFilter) {
+          filteredResults = safeResults.filter((result) => {
+            const typeName = result.type_name || '';
+            return !yellowWords.some((word: string) => typeName.includes(word));
+          });
+        }
+
+        filteredResults = filteredResults.map((result) => ({
+          ...result,
+          weight: result.weight ?? (weightMap.get(result.source) ?? 0),
+        }));
+
+        // 发送该源的搜索结果
+        completedSources++;
+
+        if (!streamClosed) {
+          const sourceEvent = `data: ${JSON.stringify({
+            type: 'source_result',
+            source: site.key,
+            sourceName: site.name,
+            results: filteredResults,
+            timestamp: Date.now()
+          })}\n\n`;
+
+          if (!safeEnqueue(encoder.encode(sourceEvent))) {
+            streamClosed = true;
+            return; // 连接已关闭，停止处理
           }
+        }
 
-          filteredResults = filteredResults.map((result) => ({
-            ...result,
-            weight: result.weight ?? (weightMap.get(result.source) ?? 0),
+        if (filteredResults.length > 0) {
+          allResults.push(...filteredResults);
+        }
+
+      } catch (error) {
+        console.warn(`搜索失败 ${site.name}:`, error);
+
+        // 发送源错误事件
+        completedSources++;
+
+        if (!streamClosed) {
+          const errorEvent = `data: ${JSON.stringify({
+            type: 'source_error',
+            source: site.key,
+            sourceName: site.name,
+            error: error instanceof Error ? error.message : '搜索失败',
+            timestamp: Date.now()
+          })}\n\n`;
+
+          if (!safeEnqueue(encoder.encode(errorEvent))) {
+            streamClosed = true;
+            return; // 连接已关闭，停止处理
+          }
+        }
+      }
+
+      // 检查是否所有源都已完成
+      if (completedSources === sortedApiSites.length + (hasOpenList ? 1 : 0) + embySourcesCount + enabledScripts.length) {
+        if (!streamClosed) {
+          // 发送最终完成事件
+          const completeEvent = `data: ${JSON.stringify({
+            type: 'complete',
+            totalResults: allResults.length,
+            completedSources,
+            timestamp: Date.now()
+          })}\n\n`;
+
+          if (safeEnqueue(encoder.encode(completeEvent))) {
+            // 只有在成功发送完成事件后才关闭流
+            try {
+              controller.close();
+            } catch (error) {
+              console.warn('Failed to close controller:', error);
+            }
+          }
+        }
+      }
           }));
-
-          // 发送该源的搜索结果
-          completedSources++;
-
-          if (!streamClosed) {
-            const sourceEvent = `data: ${JSON.stringify({
-              type: 'source_result',
-              source: site.key,
-              sourceName: site.name,
-              results: filteredResults,
-              timestamp: Date.now()
-            })}\n\n`;
-
-            if (!safeEnqueue(encoder.encode(sourceEvent))) {
-              streamClosed = true;
-              return; // 连接已关闭，停止处理
-            }
-          }
-
-          if (filteredResults.length > 0) {
-            allResults.push(...filteredResults);
-          }
-
-        } catch (error) {
-          console.warn(`搜索失败 ${site.name}:`, error);
-
-          // 发送源错误事件
-          completedSources++;
-
-          if (!streamClosed) {
-            const errorEvent = `data: ${JSON.stringify({
-              type: 'source_error',
-              source: site.key,
-              sourceName: site.name,
-              error: error instanceof Error ? error.message : '搜索失败',
-              timestamp: Date.now()
-            })}\n\n`;
-
-            if (!safeEnqueue(encoder.encode(errorEvent))) {
-              streamClosed = true;
-              return; // 连接已关闭，停止处理
-            }
-          }
         }
-
-        // 检查是否所有源都已完成
-        if (completedSources === sortedApiSites.length + (hasOpenList ? 1 : 0) + embySourcesCount + enabledScripts.length) {
-          if (!streamClosed) {
-            // 发送最终完成事件
-            const completeEvent = `data: ${JSON.stringify({
-              type: 'complete',
-              totalResults: allResults.length,
-              completedSources,
-              timestamp: Date.now()
-            })}\n\n`;
-
-            if (safeEnqueue(encoder.encode(completeEvent))) {
-              // 只有在成功发送完成事件后才关闭流
-              try {
-                controller.close();
-              } catch (error) {
-                console.warn('Failed to close controller:', error);
-              }
-            }
-          }
-        }
-      });
+      };
+      const apiSitesPromise = processApiSites();
 
       const scriptPromises = enabledScripts.map(async (script) => {
         try {
@@ -535,7 +543,7 @@ export async function GET(request: NextRequest) {
       });
 
       // 等待所有搜索完成
-      await Promise.allSettled([...searchPromises, ...scriptPromises]);
+      await Promise.allSettled([apiSitesPromise, ...scriptPromises]);
     },
 
     cancel() {
