@@ -1,6 +1,6 @@
 name = "moontv-plus"
 compatibility_date = "2024-09-23"
-compatibility_flags = ["nodejs_compat", "unsafe_eval"]
+compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
 minify = true
 
