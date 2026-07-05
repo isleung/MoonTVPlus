@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import { Inter } from 'next/font/google';
 import { cookies } from 'next/headers';
 
@@ -312,6 +313,20 @@ export default async function RootLayout({
         <link rel='apple-touch-icon' href='/icons/icon-192x192.png' />
         {/* 主题CSS */}
         <link rel='stylesheet' href='/api/theme/css' />
+        {/* Microsoft Clarity */}
+        <Script
+          id='clarity-script'
+          strategy='afterInteractive'
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function(c,l,a,r,i,t,y){
+                c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+                t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+                y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+              })(window, document, "clarity", "script", "xfweeucqge");
+            `,
+          }}
+        />
         {/* 将配置序列化后直接写入脚本，浏览器端可通过 window.RUNTIME_CONFIG 获取 */}
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script
