@@ -180,6 +180,11 @@ function SearchPageClient() {
     if (snapshot.length > 20) {
       setCachedResults(query, snapshot, 'partial');
     }
+    // 保存滚动位置，用于返回时恢复
+    try {
+      const scrollTop = document.body.scrollTop || 0;
+      sessionStorage.setItem('searchScrollPosition', String(scrollTop));
+    } catch {}
   };
 
   // 清除指定查询的缓存
@@ -1110,6 +1115,23 @@ function SearchPageClient() {
       document.body.removeEventListener('scroll', handleScroll);
     };
   }, []);
+
+  // 返回搜索页时恢复滚动位置
+  useEffect(() => {
+    if (searchResults.length === 0) return;
+    try {
+      const saved = sessionStorage.getItem('searchScrollPosition');
+      if (saved) {
+        const pos = parseInt(saved, 10);
+        sessionStorage.removeItem('searchScrollPosition');
+        // 延迟恢复，等待 DOM 和虚拟滚动渲染完成
+        const timer = setTimeout(() => {
+          document.body.scrollTo({ top: pos, behavior: 'instant' as ScrollBehavior });
+        }, 200);
+        return () => clearTimeout(timer);
+      }
+    } catch {}
+  }, [searchResults.length]);
 
   useEffect(() => {
     if (!featureFlagsReady) return;
