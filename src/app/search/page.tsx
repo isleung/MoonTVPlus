@@ -773,7 +773,7 @@ function SearchPageClient() {
       viewMode === 'agg'
         ? filteredAggResults.length
         : filteredAllResults.length;
-    return resultDisplayMode === 'card' && cardCount >= 100;
+    return resultDisplayMode === 'card' && cardCount >= 30;
   }, [
     viewMode,
     resultDisplayMode,

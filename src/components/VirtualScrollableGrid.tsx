@@ -18,7 +18,7 @@ interface VirtualScrollableGridProps {
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
 const DEFAULT_ROW_HEIGHT = 320;
-const MAX_MEASURE_ITEMS = 24;
+const MAX_MEASURE_ITEMS = 6;
 const SAME_ROW_TOLERANCE = 1;
 
 interface LayoutMetrics {
@@ -291,7 +291,7 @@ export default function VirtualScrollableGrid({
 
   return (
     <div ref={containerRef} className='relative w-full'>
-      {/* hidden measuring row (first visible row) */}
+      {/* hidden measuring row — 用轻量占位 div 代替真实子组件，避免实例化开销 */}
       <div
         className='pointer-events-none absolute left-0 top-0 -z-10 w-full opacity-0'
         aria-hidden='true'
@@ -299,10 +299,8 @@ export default function VirtualScrollableGrid({
         <div ref={measureGridRef} className={gridClassName}>
           {children
             .slice(0, Math.min(children.length, MAX_MEASURE_ITEMS))
-            .map((child, idx) => (
-              <div key={`measure-${idx}`} data-virtual-measure-item>
-                {child}
-              </div>
+            .map((_, idx) => (
+              <div key={`measure-${idx}`} data-virtual-measure-item style={{ minHeight: 1 }} />
             ))}
         </div>
       </div>
