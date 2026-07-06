@@ -291,7 +291,7 @@ export default function VirtualScrollableGrid({
 
   return (
     <div ref={containerRef} className='relative w-full'>
-      {/* hidden measuring row — 用轻量占位 div 代替真实子组件，避免实例化开销 */}
+      {/* hidden measuring row — 渲染真实子组件以测量行高，只取少量样本 */}
       <div
         className='pointer-events-none absolute left-0 top-0 -z-10 w-full opacity-0'
         aria-hidden='true'
@@ -299,8 +299,10 @@ export default function VirtualScrollableGrid({
         <div ref={measureGridRef} className={gridClassName}>
           {children
             .slice(0, Math.min(children.length, MAX_MEASURE_ITEMS))
-            .map((_, idx) => (
-              <div key={`measure-${idx}`} data-virtual-measure-item style={{ minHeight: 1 }} />
+            .map((child, idx) => (
+              <div key={`measure-${idx}`} data-virtual-measure-item>
+                {child}
+              </div>
             ))}
         </div>
       </div>
