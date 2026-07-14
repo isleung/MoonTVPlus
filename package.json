@@ -91,6 +91,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "wrangler": "^3.0.0",
     "@opennextjs/cloudflare": "^1.15.1",
     "@svgr/webpack": "^8.1.0",
     "@tailwindcss/forms": "^0.5.10",
